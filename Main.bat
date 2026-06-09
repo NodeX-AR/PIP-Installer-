@@ -32,191 +32,178 @@ if %errorLevel% equ 0 (
 echo Step 1: Checking current pip availability...
 call :check_pip
 
-:: Step 2: If pip not found, scan for all Python versions
-if "%PIP_FOUND%"=="false" (
-    echo.
-    echo Step 2: Scanning entire computer for Python installations...
-    
-    :: Scan common Python installation locations
-    set PYTHON_INSTALLATIONS=
-    set COUNT=0
-    
-    :: Check Program Files
-    for /d %%i in ("C:\Program Files\Python*") do (
-        if exist "%%i\python.exe" (
-            set /a COUNT+=1
-            set PYTHON_!COUNT!=%%i
-            echo Found Python: %%i
-        )
-    )
-    
-    :: Check Program Files (x86)
-    for /d %%i in ("C:\Program Files (x86)\Python*") do (
-        if exist "%%i\python.exe" (
-            set /a COUNT+=1
-            set PYTHON_!COUNT!=%%i
-            echo Found Python: %%i
-        )
-    )
-    
-    :: Check LocalAppData
-    for /d %%i in ("%LOCALAPPDATA%\Programs\Python\Python*") do (
-        if exist "%%i\python.exe" (
-            set /a COUNT+=1
-            set PYTHON_!COUNT!=%%i
-            echo Found Python: %%i
-        )
-    )
-    
-    :: Check WindowsApps (if accessible)
-    for /d %%i in ("%LOCALAPPDATA%\Microsoft\WindowsApps\Python*") do (
-        if exist "%%i\python.exe" (
-            set /a COUNT+=1
-            set PYTHON_!COUNT!=%%i
-            echo Found Python: %%i
-        )
-    )
-    
-    :: Additional scan using where command (slower but thorough)
-    echo Scanning using where command (this may take a moment)...
-    for /f "delims=" %%i in ('where /r C:\ python.exe 2^>nul') do (
-        set "PYTHON_PATH=%%i"
-        set "PYTHON_DIR=!PYTHON_PATH:\python.exe=!"
-        if not defined PYTHON_INST_!PYTHON_DIR! (
-            set PYTHON_INST_!PYTHON_DIR!=true
-            set /a COUNT+=1
-            set PYTHON_!COUNT!=!PYTHON_DIR!
-            echo Found Python: !PYTHON_DIR!
-        )
-    )
-    
-    echo.
-    echo Total Python installations found: !COUNT!
-    
-    :: Step 3: Delete all if more than one Python version
-    if !COUNT! gtr 1 (
-        echo.
-        echo Step 3: More than one Python version found. Deleting all...
-        for /l %%i in (1,1,!COUNT!) do (
-            echo Deleting: !PYTHON_%%i!
-            rmdir /s /q "!PYTHON_%%i!" 2>nul
-            if exist "!PYTHON_%%i!\python.exe" (
-                echo Failed to delete: !PYTHON_%%i! (might be in use)
-            ) else (
-                echo Successfully deleted: !PYTHON_%%i!
-            )
-        )
-    )
-    
-    :: Step 4: Install new Python version
-    echo.
-    echo Step 4: Installing latest Python version...
-    
-    :: Download latest Python installer
-    set PYTHON_INSTALLER=python_installer.exe
-    set PYTHON_VERSION=3.12.4
-    
-    echo Downloading Python %PYTHON_VERSION%...
-    powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-amd64.exe' -OutFile '%TEMP%\%PYTHON_INSTALLER%'"
-    
-    if not exist "%TEMP%\%PYTHON_INSTALLER%" (
-        echo Failed to download Python installer. Please check your internet connection.
-        pause
-        exit /b 1
-    )
-    
-    echo Installing Python (silent installation)...
-    "%TEMP%\%PYTHON_INSTALLER%" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
-    
-    :: Wait for installation to complete
-    timeout /t 10 /nobreak >nul
-    
-    echo Cleaning up installer...
-    del "%TEMP%\%PYTHON_INSTALLER%" 2>nul
-    
-    :: Refresh environment variables
-    call :refresh_env
-    
-    echo Python installation completed.
-    
-    :: Step 5: Set pip for the new Python
-    echo.
-    echo Step 5: Configuring pip for new Python...
-    
-    :: Find newly installed Python
-    for /f "delims=" %%i in ('where python 2^>nul') do (
-        set "NEW_PYTHON=%%i"
-        goto :found_python
-    )
-    
-    :found_python
-    if defined NEW_PYTHON (
-        echo Installing/upgrading pip...
-        "!NEW_PYTHON!" -m ensurepip --upgrade
-        "!NEW_PYTHON!" -m pip install --upgrade pip
-        
-        :: Add pip to PATH
-        for %%i in ("!NEW_PYTHON!") do set "PYTHON_DIR=%%~dpi"
-        set "SCRIPTS_DIR=!PYTHON_DIR!Scripts"
-        
-        :: Add to system PATH
-        setx /M PATH "!SCRIPTS_DIR!;%PATH%" >nul
-        echo Added pip to system PATH
-        
-        echo [OK] Pip has been configured for the new Python installation
-    ) else (
-        echo [ERROR] Could not find newly installed Python
-    )
-    
-) else (
-    :: If pip is already set but only one Python exists
-    echo.
-    echo Step 2: Checking Python installations...
-    
-    :: Count Python installations
-    set PYTHON_COUNT=0
-    where python >nul 2>&1
-    if !errorlevel! equ 0 set PYTHON_COUNT=1
-    
-    :: Additional scan for multiple installations
-    for /f "delims=" %%i in ('where /r C:\ python.exe 2^>nul') do (
-        set /a PYTHON_COUNT+=1
-    )
-    
-    if !PYTHON_COUNT! equ 1 (
-        echo Single Python installation detected.
-        echo Step 3: Ensuring pip is properly configured...
-        
-        :: Get Python path
-        for /f "delims=" %%i in ('where python 2^>nul') do (
-            set "CURRENT_PYTHON=%%i"
-            goto :single_found
-        )
-        
-        :single_found
-        echo Installing/upgrading pip...
-        "!CURRENT_PYTHON!" -m ensurepip --upgrade
-        "!CURRENT_PYTHON!" -m pip install --upgrade pip
-        
-        echo [OK] Pip has been updated and configured
+:: If pip is already found and working, skip to verification
+if "%PIP_FOUND%"=="true" (
+    echo Pip is already configured. Verifying installation...
+    goto :verify
+)
+
+:: Step 2: Scan for all Python versions in standard locations
+echo.
+echo Step 2: Scanning common Python installation locations...
+
+set PYTHON_INSTALLATIONS=
+set COUNT=0
+
+:: Check Program Files
+for /d %%i in ("C:\Program Files\Python*") do (
+    if exist "%%i\python.exe" (
+        set /a COUNT+=1
+        set PYTHON_!COUNT!=%%i
+        echo Found Python: %%i
     )
 )
 
+:: Check Program Files (x86)
+for /d %%i in ("C:\Program Files (x86)\Python*") do (
+    if exist "%%i\python.exe" (
+        set /a COUNT+=1
+        set PYTHON_!COUNT!=%%i
+        echo Found Python: %%i
+    )
+)
+
+:: Check LocalAppData
+for /d %%i in ("%LOCALAPPDATA%\Programs\Python\Python*") do (
+    if exist "%%i\python.exe" (
+        set /a COUNT+=1
+        set PYTHON_!COUNT!=%%i
+        echo Found Python: %%i
+    )
+)
+
+echo.
+echo Total Python installations found: !COUNT!
+
+:: Step 3: Handle multiple installations
+if !COUNT! gtr 1 (
+    echo.
+    echo Step 3: Multiple Python versions found. Deleting all...
+    for /l %%i in (1,1,!COUNT!) do (
+        echo Deleting: !PYTHON_%%i!
+        rmdir /s /q "!PYTHON_%%i!" 2>nul
+        if exist "!PYTHON_%%i!\python.exe" (
+            echo Failed to delete: !PYTHON_%%i! (might be in use)
+        ) else (
+            echo Successfully deleted: !PYTHON_%%i!
+        )
+    )
+)
+
+:: Step 4: Install Python if needed
+if !COUNT! equ 0 (
+    echo.
+    echo Step 4: No Python found. Installing Python 3.12.4...
+    goto :install_python
+) else if !COUNT! equ 1 (
+    echo.
+    echo Step 4: Single Python found. Fixing pip...
+    
+    :: Get the Python path
+    for /l %%i in (1,1,!COUNT!) do (
+        if defined PYTHON_!COUNT! (
+            set "PYTHON_PATH=!PYTHON_%%i!\python.exe"
+        )
+    )
+    
+    goto :fix_pip
+)
+
+:install_python
+set PYTHON_INSTALLER=python_installer.exe
+set PYTHON_VERSION=3.12.4
+
+echo Downloading Python %PYTHON_VERSION%...
+powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/%PYTHON_VERSION%/python-%PYTHON_VERSION%-amd64.exe' -OutFile '%TEMP%\%PYTHON_INSTALLER%' -ErrorAction Stop"
+
+if not exist "%TEMP%\%PYTHON_INSTALLER%" (
+    echo Failed to download Python installer. Please check your internet connection.
+    pause
+    exit /b 1
+)
+
+echo Installing Python (silent installation)...
+"%TEMP%\%PYTHON_INSTALLER%" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+
+:: Wait for installation to complete
+timeout /t 15 /nobreak >nul
+
+echo Cleaning up installer...
+del "%TEMP%\%PYTHON_INSTALLER%" 2>nul
+
+echo Python installation completed.
+
+:: Find newly installed Python
+for /d %%i in ("C:\Program Files\Python*") do (
+    if exist "%%i\python.exe" (
+        set "PYTHON_PATH=%%i\python.exe"
+        goto :fix_pip
+    )
+)
+
+:fix_pip
+if defined PYTHON_PATH (
+    echo.
+    echo Step 5: Configuring pip...
+    
+    :: Ensure pip is installed/upgraded
+    echo Ensuring pip is installed...
+    "!PYTHON_PATH!" -m ensurepip --upgrade >nul 2>&1
+    
+    :: Upgrade pip to latest version
+    echo Upgrading pip to latest version...
+    "!PYTHON_PATH!" -m pip install --upgrade pip >nul 2>&1
+    
+    :: Get Python directory
+    for %%i in ("!PYTHON_PATH!") do set "PYTHON_DIR=%%~dpi"
+    set "SCRIPTS_DIR=!PYTHON_DIR!Scripts"
+    
+    :: Add Scripts directory to system PATH
+    echo Adding pip/Scripts directory to system PATH...
+    
+    :: Check if already in PATH
+    for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v PATH 2^>nul') do (
+        set "CURRENT_SYS_PATH=%%b"
+    )
+    
+    if "!CURRENT_SYS_PATH!"=="" (
+        echo Failed to read current PATH. Adding to PATH using setx...
+        setx /M PATH "!SCRIPTS_DIR!"
+    ) else (
+        echo !CURRENT_SYS_PATH! | find /i "!SCRIPTS_DIR!" >nul
+        if errorlevel 1 (
+            setx /M PATH "!SCRIPTS_DIR!;!CURRENT_SYS_PATH!"
+            echo Added !SCRIPTS_DIR! to system PATH
+        ) else (
+            echo Scripts directory already in PATH
+        )
+    )
+    
+    echo [OK] Pip has been configured
+) else (
+    echo [ERROR] Could not find Python installation
+    pause
+    exit /b 1
+)
+
+:verify
 :: Final verification
 echo.
 echo ========================================
 echo Verification:
 call :check_pip
 
-:: Display pip version
+:: Display pip version and location
 if "%PIP_FOUND%"=="true" (
     echo.
-    echo Pip version information:
+    echo Pip information:
     pip --version
+    echo Pip location:
+    where pip
 ) else (
     echo.
-    echo [WARNING] Pip may not be fully configured.
-    echo Please restart your computer or manually add Python/Scripts to PATH
+    echo [WARNING] Pip could not be found in PATH
+    echo Please restart your computer for PATH changes to take effect
 )
 
 echo.
@@ -224,11 +211,3 @@ echo ========================================
 echo Setup completed!
 pause
 exit /b 0
-
-:refresh_env
-:: Refresh environment variables without restarting
-for /f "tokens=1,* delims==" %%a in ('set') do (
-    if /i "%%a"=="PATH" set "CURRENT_PATH=%%b"
-)
-set "PATH=%CURRENT_PATH%"
-goto :eof
