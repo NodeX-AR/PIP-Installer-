@@ -44,6 +44,8 @@ echo Step 2: Scanning common Python installation locations...
 
 set PYTHON_INSTALLATIONS=
 set COUNT=0
+set LATEST_VERSION=0
+set LATEST_PATH=
 
 :: Check Program Files
 for /d %%i in ("C:\Program Files\Python*") do (
@@ -51,6 +53,18 @@ for /d %%i in ("C:\Program Files\Python*") do (
         set /a COUNT+=1
         set PYTHON_!COUNT!=%%i
         echo Found Python: %%i
+        
+        :: Extract version number (e.g., "3.12" from "Python312")
+        for %%j in (%%i) do (
+            set "FOLDER_NAME=%%~nxj"
+            if "!FOLDER_NAME:~0,6!"=="Python" (
+                set "VERSION_STR=!FOLDER_NAME:~6!"
+                if !VERSION_STR! gtr !LATEST_VERSION! (
+                    set LATEST_VERSION=!VERSION_STR!
+                    set LATEST_PATH=%%i
+                )
+            )
+        )
     )
 )
 
@@ -60,6 +74,18 @@ for /d %%i in ("C:\Program Files (x86)\Python*") do (
         set /a COUNT+=1
         set PYTHON_!COUNT!=%%i
         echo Found Python: %%i
+        
+        :: Extract version number
+        for %%j in (%%i) do (
+            set "FOLDER_NAME=%%~nxj"
+            if "!FOLDER_NAME:~0,6!"=="Python" (
+                set "VERSION_STR=!FOLDER_NAME:~6!"
+                if !VERSION_STR! gtr !LATEST_VERSION! (
+                    set LATEST_VERSION=!VERSION_STR!
+                    set LATEST_PATH=%%i
+                )
+            )
+        )
     )
 )
 
@@ -69,25 +95,61 @@ for /d %%i in ("%LOCALAPPDATA%\Programs\Python\Python*") do (
         set /a COUNT+=1
         set PYTHON_!COUNT!=%%i
         echo Found Python: %%i
+        
+        :: Extract version number
+        for %%j in (%%i) do (
+            set "FOLDER_NAME=%%~nxj"
+            if "!FOLDER_NAME:~0,6!"=="Python" (
+                set "VERSION_STR=!FOLDER_NAME:~6!"
+                if !VERSION_STR! gtr !LATEST_VERSION! (
+                    set LATEST_VERSION=!VERSION_STR!
+                    set LATEST_PATH=%%i
+                )
+            )
+        )
     )
 )
 
 echo.
 echo Total Python installations found: !COUNT!
 
-:: Step 3: Handle multiple installations
+:: Step 3: Handle multiple installations - keep the latest, clean up older ones
 if !COUNT! gtr 1 (
     echo.
-    echo Step 3: Multiple Python versions found. Deleting all...
+    echo Step 3: Multiple Python versions found.
+    echo Keeping latest version: Python !LATEST_VERSION! at !LATEST_PATH!
+    echo Uninstalling older versions...
+    echo.
+    
     for /l %%i in (1,1,!COUNT!) do (
-        echo Deleting: !PYTHON_%%i!
-        rmdir /s /q "!PYTHON_%%i!" 2>nul
-        if exist "!PYTHON_%%i!\python.exe" (
-            echo Failed to delete: !PYTHON_%%i! (might be in use)
-        ) else (
-            echo Successfully deleted: !PYTHON_%%i!
+        if not "!PYTHON_%%i!"=="!LATEST_PATH!" (
+            echo Uninstalling: !PYTHON_%%i!
+            
+            :: Try to uninstall using the Python installer if available
+            set "UNINSTALLER=!PYTHON_%%i!\uninstall.exe"
+            if exist "!UNINSTALLER!" (
+                echo Found uninstaller. Running: !UNINSTALLER! /quiet
+                "!UNINSTALLER!" /quiet /uninstall >nul 2>&1
+                timeout /t 3 /nobreak >nul
+            )
+            
+            :: Force delete the directory if it still exists
+            if exist "!PYTHON_%%i!" (
+                echo Force removing directory: !PYTHON_%%i!
+                rmdir /s /q "!PYTHON_%%i!" 2>nul
+                if not exist "!PYTHON_%%i!" (
+                    echo Successfully uninstalled: !PYTHON_%%i!
+                ) else (
+                    echo [WARNING] Could not fully remove: !PYTHON_%%i! (may still be in use)
+                )
+            )
         )
     )
+    
+    echo.
+    echo Proceeding with pip setup for latest version...
+    set "PYTHON_PATH=!LATEST_PATH!\python.exe"
+    goto :fix_pip
 )
 
 :: Step 4: Install Python if needed
@@ -100,11 +162,7 @@ if !COUNT! equ 0 (
     echo Step 4: Single Python found. Fixing pip...
     
     :: Get the Python path
-    for /l %%i in (1,1,!COUNT!) do (
-        if defined PYTHON_!COUNT! (
-            set "PYTHON_PATH=!PYTHON_%%i!\python.exe"
-        )
-    )
+    set "PYTHON_PATH=!PYTHON_1!\python.exe"
     
     goto :fix_pip
 )
